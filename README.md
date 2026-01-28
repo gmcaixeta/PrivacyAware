@@ -31,23 +31,30 @@ Maximizando **F1-score**, com **ênfase em recall** (minimizar falsos negativos)
 3. **OR lógico final** → se *qualquer* um detectar → classifica como positivo
 
 ```mermaid
-flowchart TD
-    A[Texto de entrada] --> B[Pré-processamento]
-    B --> C{Detector Regex<br/>dados pessoais explícitos}
-    C -->|Encontrou match| D[Aplicar regras]
-    C -->|Sem match| E[Vetorização TF-IDF]
-    E --> F[Classificador Linear]
-    F --> G[Predição ML]
-    D --> H[Combinação<br/>Regex OR ML]
-    G --> H
-    H --> I{Predição final}
-    I -->|Dados pessoais| J[🚫 Identificado]
-    I -->|Sem dados pessoais| K[✅ Limpo]
+%%{init: {
+  "theme": "default",
+  "themeVariables": {
+    "fontSize": "10px",
+    "nodePadding": "4",
+    "nodeBorder": "0.5px"
+  },
+  "flowchart": {
+    "nodeSpacing": 10,
+    "rankSpacing": 30
+  }
+}}%%
+flowchart LR
+    A[Texto] --> B[Pré-processo]
+    B --> C{Regex}
+    C -->|+| F[Dados Pessoais]
+    C -->|N| D[TF-IDF]
+    D --> E[Classificador]
+    E -->|+| F
+    E -->|-| G[Limpo]
     
     style A fill:#e1f5fe
-    style I fill:#ffebee
-    style J fill:#ffcdd2
-    style K fill:#c8e6c9
+    style F fill:#ffcdd2
+    style G fill:#c8e6c9
 
 ```
 
