@@ -22,7 +22,7 @@ Maximizando **F1-score**, com **ênfase em recall** (minimizar falsos negativos)
 
 ---
 
-## 🧠 Estratégia geral (o pulo do gato)
+## 🧠 Estratégia geral
 
 **Pipeline híbrido**:
 
