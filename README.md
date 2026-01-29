@@ -27,7 +27,7 @@ Maximizando **F1-score**, com **ênfase em recall** (minimizar falsos negativos)
 **Pipeline híbrido**:
 
 1. **Regras determinísticas (regex)** → capturam casos óbvios
-2. **Modelo estatístico simples (ML clássico)** → pega padrões não explícitos
+2. **Modelo NER (Named Entity Recognition)** → pega padrões não explícitos
 3. **OR lógico final** → se *qualquer* um detectar → classifica como positivo
 
 ```mermaid
@@ -47,10 +47,10 @@ flowchart LR
     A[Texto] --> B[Pré-processo]
     B --> C{Regex}
     C -->|+| F[Dados Pessoais]
-    C -->|N| D[TF-IDF]
+    C -->|N| D[NER]
     D --> E[Classificador]
     E -->|+| F
-    E -->|-| G[Limpo]
+    E -->|-| G[Dados públicos]
     
     style A fill:#e1f5fe
     style F fill:#ffcdd2
