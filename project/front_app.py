@@ -1,6 +1,9 @@
+import io
+import os
+import zipfile
 import panel as pn
 import pandas as pd
-import io
+
 from pathlib import Path
 from typing import Optional
 
@@ -473,6 +476,14 @@ class PIIDetectorApp:
 
 def create_pii_app():
     """Factory function para criar instância do app."""
+
+
+    # Descompactar models.zip se a pasta models/ não existir
+    if not os.path.exists('models') and os.path.exists('models.zip'):
+        with zipfile.ZipFile('models.zip', 'r') as zip_ref:
+            zip_ref.extractall('.')
+        print("✅ Modelo descompactado com sucesso!")
+        
     app = PIIDetectorApp()
     return app.show()
 
