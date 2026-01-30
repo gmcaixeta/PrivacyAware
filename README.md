@@ -79,10 +79,10 @@ flowchart LR
 
 
 
-* O arquivo deve ter **apenas uma coluna**
+* O arquivo deve ter **apenas uma coluna** 
 * **Cada linha** deve conter **um texto a ser validado**
 * A **primeira linha** deve ser o **nome da coluna** (exemplo: `mensagens`)
-
+* Na pasta dados (localizada dentro da pasta project), existe um arquivo de exemplo (amostra.csv).
 
 Exemplo conceitual:
 
