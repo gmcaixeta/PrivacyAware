@@ -267,20 +267,6 @@ Acesse no navegador: **http://localhost:8081**
 
 ---
 
-### **Passo 8: Parar a Aplicação**
-
-Pressione `Ctrl + C` no terminal.
-
----
-
-### **🔄 Passo Opcional: Retreinar o Modelo**
-
-```bash
-python train_model.py
-```
-
-Os novos modelos serão salvos em `models/`.
-
 ---
 
 ## 🐛 Solução de Problemas Comuns
