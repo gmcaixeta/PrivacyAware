@@ -1,6 +1,13 @@
 # Projeto PrivacyAware
 
 
+### Video Explicativo (clicar na imagem abaixo)
+
+[![Video Thumbnail Alt Text](https://img.youtube.com/vi/5qS9KVnrAiI/0.jpg)](https://youtu.be/5qS9KVnrAiI)
+
+
+---
+
 Objetivo do projeto:
 
 Classificar pedidos de acesso à informação em:
@@ -21,8 +28,6 @@ Maximizando **F1-score**, com **ênfase em recall** (minimizar falsos negativos)
 * ✔️ Robustez > sofisticação
 
 ---
-
-[![Video Thumbnail Alt Text](https://img.youtube.com/vi/5qS9KVnrAiI/0.jpg)](https://youtu.be/5qS9KVnrAiI)
 
 
 ## 🧠 Estratégia geral
