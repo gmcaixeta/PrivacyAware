@@ -26,12 +26,13 @@ project/
 
 ## 🚀 Tutorial 1 — Instalação usando Docker (Recomendado)
 
+
 ### O que é Docker?
 Docker é como uma "máquina virtual leve" que garante que o projeto funcione igual em qualquer computador.
 
----
-
 ### **Passo 1: Instalar o Docker**
+
+* Caso já tenha o docker instalado na maquina, pular o passo 1, e começar no passo 2 (igual ao vídeo).
 
 #### Windows:
 1. Baixe o Docker Desktop: https://docs.docker.com/desktop/install/windows-install/
@@ -57,6 +58,7 @@ sudo usermod -aG docker $USER
 
 # Reiniciar a sessão (ou reiniciar o computador)
 ```
+---
 
 **Verificar se o Docker foi instalado:**
 ```bash
@@ -65,6 +67,10 @@ docker --version
 Você deve ver algo como: `Docker version 24.0.7`
 
 ---
+
+### ▶️ Video Explicativo (clicar na imagem abaixo) - Esse vídeo mostra a partir do passo 2 (docker deve estar instalado)
+
+[![Video Thumbnail Alt Text](https://img.youtube.com/vi/_zDOn4wQs3A/0.jpg)](https://youtu.be/_zDOn4wQs3A)
 
 ### **Passo 2: Clonar o Repositório**
 
