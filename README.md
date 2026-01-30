@@ -75,7 +75,8 @@ flowchart LR
 
 ## 🧾 1. Preparar o arquivo CSV
 
-![formato_csv](project/imgs/formato_csv.png)
+<img src="project/imgs/formato_csv.png" width="300">
+
 
 
 * O arquivo deve ter **apenas uma coluna**
