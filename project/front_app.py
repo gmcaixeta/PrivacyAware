@@ -414,7 +414,6 @@ class PIIDetectorApp:
                 - ✅ RG, CNH, outros documentos
                 - ✅ Email pessoal
                 - ✅ Telefone
-                - ✅ Endereço completo
                 
                 ### Intent: "publico" (Público)
                 Quando encontra:
