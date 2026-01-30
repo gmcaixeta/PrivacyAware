@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Optional
 
 # Importa o detector NLU
-from detector_nlu import PIIDetector
+from detector_nlu import PIIDetectorV2
 
 pn.extension('tabulator', notifications=True)
 
 # Caminho do modelo treinado
-MODEL_PATH = Path("./models/pii_nlu_model")
+MODEL_PATH = Path("./models/pii_v2_model/latest")
 
 # =============================================================================
 # APP PANEL HOLOVIZ - DETECTOR DE PII COM NLU
@@ -23,7 +23,7 @@ class PIIDetectorApp:
         # Estado
         self.df_original: Optional[pd.DataFrame] = None
         self.df_result: Optional[pd.DataFrame] = None
-        self.detector: Optional[PIIDetector] = None
+        self.detector: Optional[PIIDetectorV2] = None
         self.is_detector_ready = False
         
         # Widgets
@@ -53,7 +53,7 @@ class PIIDetectorApp:
             print(f"🧠 Carregando modelo NLU de: {MODEL_PATH}")
             
             # Carrega o detector NLU com modelo treinado
-            self.detector = PIIDetector()
+            self.detector = PIIDetectorV2()
             self.detector.load(str(MODEL_PATH))
             
             self.is_detector_ready = True

@@ -1,0 +1,47 @@
+{
+  "timestamp": "20260130_005519",
+  "config": {
+    "n_public_examples": 1000,
+    "n_pii_examples": 1000,
+    "incluir_extenso": true,
+    "n_iterations": 30,
+    "dropout_rate": 0.5,
+    "batch_size": 8,
+    "test_split": 0.2,
+    "random_seed": 42
+  },
+  "results": {
+    "accuracy": 0.8142857142857143,
+    "total_examples": 420,
+    "correct": 342,
+    "incorrect": 78,
+    "by_intent": {
+      "publico": {
+        "total": 200,
+        "correct": 185,
+        "tp": 185,
+        "fp": 63,
+        "fn": 15,
+        "precision": 0.7459677419354839,
+        "recall": 0.925,
+        "f1_score": 0.8258928571428572
+      },
+      "tem_pii": {
+        "total": 220,
+        "correct": 157,
+        "tp": 157,
+        "fp": 15,
+        "fn": 63,
+        "precision": 0.9127906976744186,
+        "recall": 0.7136363636363636,
+        "f1_score": 0.8010204081632651
+      }
+    },
+    "confusion_matrix": {
+      "publico_as_publico": 185,
+      "publico_as_pii": 15,
+      "pii_as_publico": 63,
+      "pii_as_pii": 157
+    }
+  }
+}

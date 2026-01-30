@@ -1,8 +1,15 @@
 """
-Detector de PII com sistema de palavras-gatilho para contexto público.
+Detector de PII - VERSÃO CORRIGIDA
+==================================
 
-NOVIDADE: Usa palavras-gatilho para distinguir nomes em contexto público
-(ex: "Hospital João Silva" = público) de nomes pessoais (ex: "João Silva solicitou" = PII)
+MUDANÇA FUNDAMENTAL:
+- Separação clara entre EXTRAÇÃO (NER) e CLASSIFICAÇÃO (decisão de PII)
+- PII só existe quando há PAPEL INDIVIDUALIZANTE
+- Nome ≠ PII por default
+
+Baseado na análise do edital:
+"Solicitações do cidadão que não permitam a identificação de uma pessoa natural 
+podem ser consideradas públicas."
 """
 
 from typing import List, Tuple, Dict, Optional, Set
@@ -19,596 +26,443 @@ from first_names_static import FIRST_NAMES
 from sir_name_static import SIR_NAMES
 
 # =============================================================================
-# PALAVRAS-GATILHO PARA CONTEXTO PÚBLICO
+# CAMADA 1: PALAVRAS-GATILHO PARA CONTEXTO PÚBLICO (Exclusão Explícita)
 # =============================================================================
 
-PALAVRAS_GATILHO_PUBLICO = {
-    # Saúde
+CONTEXTO_NAO_PII = {
+    # Denominações institucionais
     'hospital', 'maternidade', 'upa', 'ubs', 'posto de saúde', 'clínica', 
     'policlínica', 'ambulatório', 'pronto-socorro', 'pronto socorro',
     
-    # Educação
     'escola', 'colégio', 'universidade', 'faculdade', 'instituto', 'fundação',
     'creche', 'centro educacional', 'campus',
     
-    # Cultura
     'biblioteca', 'museu', 'arquivo', 'teatro', 'centro cultural', 'galeria',
     'auditório', 'casa de cultura', 'memorial',
     
-    # Vias públicas
+    # Vias públicas e topônimos
     'rua', 'r.', 'r', 'avenida', 'av.', 'av', 'alameda', 'travessa', 'praça',
     'largo', 'rodovia', 'estrada', 'via', 'viaduto', 'ponte', 'túnel', 
-    'rotatória', 'passarela', 'viela', 'beco',
+    'rotatória', 'passarela', 'viela', 'beco', 'bairro', 'distrito',
     
     # Edificações públicas
     'edifício', 'prédio', 'palácio', 'fórum', 'tribunal', 'cartório', 
     'delegacia', 'batalhão', 'quartel', 'prefeitura', 'câmara', 'assembleia',
-    'secretaria', 'ministério', 'sede', 'anexo',
     
-    # Atos normativos
-    'lei', 'decreto', 'portaria', 'resolução', 'instrução normativa', 
-    'ato normativo', 'estatuto', 'regimento', 'medida provisória', 'emenda',
-    'norma', 'regulamento', 'diretriz',
-    
-    # Órgãos públicos
-    'ministério', 'secretaria', 'autarquia', 'fundação pública', 'empresa pública',
-    'poder executivo', 'poder legislativo', 'poder judiciário', 'tribunal',
-    'stf', 'stj', 'tcu', 'cgu', 'mp', 'conselho', 'comissão',
-    
-    # Documentos administrativos
-    'processo', 'procedimento', 'protocolo', 'ofício', 'memorando', 'despacho',
-    'relatório', 'parecer', 'nota técnica', 'edital', 'licitação', 
-    'contrato administrativo', 'termo', 'ata',
+    # Atos normativos e homenagens
+    'lei', 'decreto', 'portaria', 'resolução', 'instrução normativa',
+    'programa', 'projeto', 'plano', 'prêmio', 'medalha', 'comenda',
+    'relatório', 'parecer', 'nota técnica',
     
     # Empresas (sufixos)
     's.a.', 'sa', 's.a', 'ltda', 'ltda.', 'eireli', 'me', 'mei', 'companhia',
-    'empresa', 'grupo', 'holding', 'associação', 'cooperativa', 'sindicato',
-    'federação', 'confederação', 'ong', 'oscip',
-    
-    # Cargos públicos
-    'presidente', 'diretor', 'secretário', 'ministro', 'prefeito', 'governador',
-    'senador', 'deputado', 'vereador', 'relator', 'servidor', 'funcionário',
-    'gestor', 'coordenador', 'chefe', 'superintendente', 'procurador',
-    
-    # Programas e projetos
-    'programa', 'projeto', 'plano', 'ação', 'iniciativa', 'campanha', 'operação',
-    'prêmio', 'medalha', 'comenda', 'ordem', 'bolsa', 'auxílio',
-    
-    # Dados e estatísticas
-    'dados', 'estatísticas', 'indicadores', 'relatório anual', 'balanço',
-    'demonstrativo', 'série histórica', 'painel', 'dashboard', 'censo',
-    
-    # Religiosos
-    'igreja', 'catedral', 'basílica', 'capela', 'mosteiro', 'convento', 
-    'templo', 'santuário', 'paróquia', 'diocese',
-    
-    # Localização
-    'bairro', 'distrito', 'região', 'zona', 'setor', 'quadra', 'lote',
-    'km', 'cep', 'endereço', 'logradouro',
+    'empresa', 'grupo', 'holding', 'associação', 'cooperativa',
 }
 
-# Converte para lowercase e cria versões com/sem pontuação
-PALAVRAS_GATILHO_PUBLICO_NORMALIZED = set()
-for palavra in PALAVRAS_GATILHO_PUBLICO:
-    PALAVRAS_GATILHO_PUBLICO_NORMALIZED.add(palavra.lower())
-    # Remove pontos
-    PALAVRAS_GATILHO_PUBLICO_NORMALIZED.add(palavra.lower().replace('.', ''))
+# Normaliza (lowercase, sem pontuação)
+CONTEXTO_NAO_PII_NORMALIZED = set()
+for palavra in CONTEXTO_NAO_PII:
+    CONTEXTO_NAO_PII_NORMALIZED.add(palavra.lower())
+    CONTEXTO_NAO_PII_NORMALIZED.add(palavra.lower().replace('.', ''))
 
 # =============================================================================
-# FUNÇÕES DE DETECÇÃO DE CONTEXTO
+# CAMADA 2: PAPÉIS INDIVIDUALIZANTES (Decisão de PII)
 # =============================================================================
 
-def tem_contexto_publico(texto: str, pos_inicio: int, pos_fim: int, janela: int = 50) -> bool:
-    """
-    Verifica se um nome está em contexto público.
+# Estes padrões indicam que o nome identifica uma PESSOA NATURAL
+PAPEIS_INDIVIDUALIZANTES = {
+    # Ações individuais (verbos)
+    'verbos': {
+        'solicitou', 'requereu', 'requisitou', 'pediu', 'demandou',
+        'protocolou', 'apresentou', 'encaminhou', 'enviou',
+        'compareceu', 'assinou', 'autorizou', 'declarou',
+        'reclamou', 'denunciou', 'reportou',
+    },
     
-    Args:
-        texto: Texto completo
-        pos_inicio: Posição inicial do nome
-        pos_fim: Posição final do nome
-        janela: Tamanho da janela de busca (caracteres antes/depois)
+    # Papéis nominais
+    'papeis': {
+        'solicitante', 'requerente', 'requisitante', 'demandante',
+        'cidadão', 'cidadã', 'munícipe', 'contribuinte',
+        'titular', 'responsável', 'representante', 'interessado',
+        'reclamante', 'denunciante', 'autor', 'peticionário',
+        'morador', 'moradora', 'residente', 'paciente',
+    },
+    
+    # Contextos de identificação
+    'contextos_id': {
+        'nome:', 'nome completo:', 'identificação:', 'titular:',
+        'dados do solicitante', 'dados do requerente',
+        'qualidade de', 'na qualidade de',  # "na qualidade de representante"
+    }
+}
+
+# =============================================================================
+# FUNÇÕES DE CLASSIFICAÇÃO SEMÂNTICA
+# =============================================================================
+
+def extrair_janela_contexto(texto: str, pos_inicio: int, pos_fim: int, 
+                           janela_antes: int = 50, janela_depois: int = 50) -> str:
+    """Extrai janela de contexto ao redor de uma entidade."""
+    inicio = max(0, pos_inicio - janela_antes)
+    fim = min(len(texto), pos_fim + janela_depois)
+    return texto[inicio:fim].lower()
+
+def tem_papel_individualizante(texto: str, nome: str, pos_inicio: int, pos_fim: int) -> Dict:
+    """
+    Verifica se o nome está associado a um papel individualizante.
     
     Returns:
-        True se o nome está em contexto público (não é PII)
+        {
+            'tem_papel': bool,
+            'tipo': str (verbo/papel/contexto_id),
+            'evidencia': str
+        }
     """
-    # Extrai contexto ao redor do nome
-    inicio_contexto = max(0, pos_inicio - janela)
-    fim_contexto = min(len(texto), pos_fim + janela)
-    contexto = texto[inicio_contexto:fim_contexto].lower()
+    # Extrai contexto expandido
+    contexto = extrair_janela_contexto(texto, pos_inicio, pos_fim, 100, 100)
     
-    # Busca por palavras-gatilho
-    for palavra_gatilho in PALAVRAS_GATILHO_PUBLICO_NORMALIZED:
-        if palavra_gatilho in contexto:
+    # 1. Verifica verbos de ação individual
+    for verbo in PAPEIS_INDIVIDUALIZANTES['verbos']:
+        if verbo in contexto:
+            return {
+                'tem_papel': True,
+                'tipo': 'verbo_individual',
+                'evidencia': verbo
+            }
+    
+    # 2. Verifica papéis nominais
+    for papel in PAPEIS_INDIVIDUALIZANTES['papeis']:
+        if papel in contexto:
+            return {
+                'tem_papel': True,
+                'tipo': 'papel_nominal',
+                'evidencia': papel
+            }
+    
+    # 3. Verifica contextos de identificação
+    for contexto_id in PAPEIS_INDIVIDUALIZANTES['contextos_id']:
+        if contexto_id in contexto:
+            return {
+                'tem_papel': True,
+                'tipo': 'contexto_identificacao',
+                'evidencia': contexto_id
+            }
+    
+    return {
+        'tem_papel': False,
+        'tipo': None,
+        'evidencia': None
+    }
+
+def tem_dado_associado(texto: str, nome: str, pos_inicio: int, pos_fim: int) -> bool:
+    """
+    Verifica se há dados pessoais (CPF, RG, email, telefone) próximos ao nome.
+    Isso é forte indicador de pessoa natural.
+    """
+    contexto = extrair_janela_contexto(texto, pos_inicio, pos_fim, 150, 150)
+    
+    # Padrões simplificados
+    padroes = [
+        r'\bcpf\b',
+        r'\brg\b',
+        r'\bemail\b',
+        r'\btelefone\b',
+        r'\d{3}\.?\d{3}\.?\d{3}-?\d{2}',  # CPF
+        r'\d{2}\.?\d{3}\.?\d{3}',  # RG
+        r'[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}',  # Email
+    ]
+    
+    for padrao in padroes:
+        if re.search(padrao, contexto):
             return True
     
     return False
 
-def extrair_contexto_nome(texto: str, nome: str) -> Dict:
+def tem_contexto_exclusao(texto: str, nome: str, pos_inicio: int, pos_fim: int) -> Dict:
     """
-    Extrai informações de contexto de um nome no texto.
+    Verifica se o nome está em contexto de EXCLUSÃO (não é PII).
     
     Returns:
         {
-            'tem_contexto_publico': bool,
-            'palavras_gatilho_encontradas': List[str],
-            'contexto': str
+            'excluir': bool,
+            'motivo': str,
+            'palavra_gatilho': str
         }
     """
-    import re
+    # Janela mais curta para contextos de exclusão (precisam estar MUITO próximos)
+    contexto = extrair_janela_contexto(texto, pos_inicio, pos_fim, 30, 30)
     
-    # Encontra todas as ocorrências do nome
-    pattern = re.escape(nome)
-    matches = list(re.finditer(pattern, texto, re.IGNORECASE))
+    # 1. Busca palavras-gatilho de denominação institucional
+    for palavra in CONTEXTO_NAO_PII_NORMALIZED:
+        if palavra in contexto:
+            return {
+                'excluir': True,
+                'motivo': 'denominacao_institucional',
+                'palavra_gatilho': palavra
+            }
     
-    if not matches:
-        return {
-            'tem_contexto_publico': False,
-            'palavras_gatilho_encontradas': [],
-            'contexto': ''
-        }
+    # 2. Padrões específicos de exclusão
+    padroes_exclusao = [
+        # Lei + Nome
+        (r'\blei\s+[a-záàâãéèêíïóôõöúçñ]+\s+[a-záàâãéèêíïóôõöúçñ]+', 'lei_homenagem'),
+        
+        # Prêmio/Projeto + Nome
+        (r'\b(prêmio|projeto|programa)\s+[a-záàâãéèêíïóôõöúçñ]+', 'homenagem'),
+        
+        # Relatório + Nome
+        (r'\brelatório\s+[a-záàâãéèêíïóôõöúçñ]+', 'relatorio_nomeado'),
+    ]
     
-    # Analisa primeira ocorrência
-    match = matches[0]
-    pos_inicio = match.start()
-    pos_fim = match.end()
-    
-    # Contexto expandido
-    janela = 100
-    inicio_contexto = max(0, pos_inicio - janela)
-    fim_contexto = min(len(texto), pos_fim + janela)
-    contexto = texto[inicio_contexto:fim_contexto]
-    contexto_lower = contexto.lower()
-    
-    # Busca palavras-gatilho
-    palavras_encontradas = []
-    for palavra in PALAVRAS_GATILHO_PUBLICO_NORMALIZED:
-        if palavra in contexto_lower:
-            palavras_encontradas.append(palavra)
+    for padrao, motivo in padroes_exclusao:
+        if re.search(padrao, contexto, re.IGNORECASE):
+            return {
+                'excluir': True,
+                'motivo': motivo,
+                'palavra_gatilho': padrao
+            }
     
     return {
-        'tem_contexto_publico': len(palavras_encontradas) > 0,
-        'palavras_gatilho_encontradas': palavras_encontradas,
-        'contexto': contexto.strip()
+        'excluir': False,
+        'motivo': None,
+        'palavra_gatilho': None
+    }
+
+def nome_identifica_pessoa_natural(texto: str, nome: str, 
+                                   pos_inicio: int, pos_fim: int) -> Dict:
+    """
+    DECISÃO CENTRAL: Este nome identifica uma pessoa natural?
+    
+    Lógica:
+    1. Se tem contexto de exclusão → NÃO é PII
+    2. Se tem papel individualizante → É PII
+    3. Se tem dado associado → É PII
+    4. Caso contrário → NÃO é PII
+    
+    Returns:
+        {
+            'e_pii': bool,
+            'razao': str,
+            'detalhes': dict
+        }
+    """
+    # 1. EXCLUSÃO tem prioridade
+    exclusao = tem_contexto_exclusao(texto, nome, pos_inicio, pos_fim)
+    if exclusao['excluir']:
+        return {
+            'e_pii': False,
+            'razao': 'contexto_exclusao',
+            'detalhes': exclusao
+        }
+    
+    # 2. Verifica papel individualizante
+    papel = tem_papel_individualizante(texto, nome, pos_inicio, pos_fim)
+    if papel['tem_papel']:
+        return {
+            'e_pii': True,
+            'razao': 'papel_individualizante',
+            'detalhes': papel
+        }
+    
+    # 3. Verifica dados associados
+    if tem_dado_associado(texto, nome, pos_inicio, pos_fim):
+        return {
+            'e_pii': True,
+            'razao': 'dados_associados',
+            'detalhes': {'tipo': 'documento_ou_contato'}
+        }
+    
+    # 4. Default: nome sem contexto individualizante NÃO é PII
+    return {
+        'e_pii': False,
+        'razao': 'sem_papel_individualizante',
+        'detalhes': {}
     }
 
 # =============================================================================
-# MAPEAMENTO DE NÚMEROS POR EXTENSO
+# GERADOR DE DADOS - VERSÃO CORRIGIDA
 # =============================================================================
 
-NUMEROS_EXTENSO = {
-    'zero': '0', 'um': '1', 'dois': '2', 'três': '3', 'tres': '3',
-    'quatro': '4', 'cinco': '5', 'seis': '6', 'sete': '7',
-    'oito': '8', 'nove': '9', 'dez': '10'
-}
-
-def normalizar_numero_extenso(texto: str) -> str:
-    """Converte números por extenso para dígitos."""
-    palavras = texto.lower().split()
-    digitos = []
+class TrainingDataGeneratorV2:
+    """
+    Gerador de dados de treinamento com foco em classificação semântica.
     
-    for palavra in palavras:
-        palavra_limpa = palavra.strip('.,;:!?')
-        if palavra_limpa in NUMEROS_EXTENSO:
-            digitos.append(NUMEROS_EXTENSO[palavra_limpa])
-    
-    return ''.join(digitos) if digitos else texto
-
-def detectar_numeros_extenso(texto: str) -> List[Dict]:
-    """Detecta sequências de números escritos por extenso."""
-    matches = []
-    palavras_numero = '|'.join(NUMEROS_EXTENSO.keys())
-    
-    pattern = rf'\b(?:{palavras_numero})(?:\s+(?:{palavras_numero})){{2,}}\b'
-    
-    for match in re.finditer(pattern, texto, re.IGNORECASE):
-        texto_extenso = match.group(0)
-        valor_numerico = normalizar_numero_extenso(texto_extenso)
-        
-        if len(valor_numerico) >= 6:
-            matches.append({
-                'start': match.start(),
-                'end': match.end(),
-                'texto_original': texto_extenso,
-                'valor_numerico': valor_numerico
-            })
-    
-    return matches
-
-# =============================================================================
-# ESTRUTURA DE DADOS
-# =============================================================================
-
-@dataclass
-class TrainingExample:
-    """Exemplo de treino."""
-    text: str
-    intent: str
-    entities: List[Dict] = field(default_factory=list)
-    
-    def to_dict(self) -> Dict:
-        return {
-            "text": self.text,
-            "intent": self.intent,
-            "entities": self.entities
-        }
-
-# =============================================================================
-# GERADOR DINÂMICO DE DADOS PÚBLICOS
-# =============================================================================
-
-class PublicDataGenerator:
-    """Gera variações dinâmicas de dados públicos."""
-    
-    ORGAOS = [
-        "Secretaria Municipal de Saúde", "Secretaria de Educação",
-        "Ministério da Justiça", "Ministério da Economia",
-        "Governo Federal", "Prefeitura Municipal",
-        "Câmara dos Deputados", "Senado Federal",
-        "STF", "STJ", "Tribunal de Contas",
-        "Controladoria Geral", "Advocacia Geral da União",
-        "Defensoria Pública", "Ministério Público",
-    ]
-    
-    ACOES = [
-        "informou", "publicou", "divulgou", "anunciou", "comunicou",
-        "notificou", "respondeu", "deferiu", "indeferiu", "arquivou",
-        "protocolou", "recebeu", "aprovou", "rejeitou",
-    ]
-    
-    TIPOS_PROCESSO = [
-        "Processo SEI", "Processo Administrativo", "Processo Judicial",
-        "Procedimento", "Protocolo", "Requerimento",
-        "Ofício", "Memorando", "Despacho", "Parecer",
-    ]
-    
-    TIPOS_NORMA = [
-        "Lei", "Decreto", "Portaria", "Resolução",
-        "Instrução Normativa", "Medida Provisória", "Emenda Constitucional",
-    ]
-    
-    TEMAS_GENERICOS = [
-        "informações sobre licitação", "dados sobre contratos",
-        "relatórios financeiros", "processos administrativos",
-        "obras públicas", "arrecadação municipal",
-        "execução orçamentária", "estatísticas de atendimento",
-        "dados de transparência", "prestação de contas",
-        "folha de pagamento", "compras governamentais",
-    ]
-    
-    EMPRESAS = [
-        "Petrobras S.A.", "Banco do Brasil", "Caixa Econômica Federal",
-        "BNDES", "Eletrobras", "Correios",
-        "Sabesp", "Cemig", "Copel",
-    ]
-    
-    # Usa palavras-gatilho para gerar exemplos com contexto
-    PALAVRAS_GATILHO_LISTA = list(PALAVRAS_GATILHO_PUBLICO)
-    NOMES_HOMENAGEM = list(FIRST_NAMES)[:100]
-    SOBRENOMES_HOMENAGEM = list(SIR_NAMES)[:100]
+    Diferenças da versão anterior:
+    1. Exemplos negativos explícitos (nomes que NÃO são PII)
+    2. Mais variação em papéis individualizantes
+    3. Menos dependência de palavras-gatilho isoladas
+    """
     
     def __init__(self):
-        pass
+        self.first_names = list(FIRST_NAMES)
+        self.last_names = list(SIR_NAMES)
     
-    def _gerar_numero_processo(self) -> str:
-        """Gera número de processo realista."""
-        formatos = [
-            "{:05d}-{:08d}/{:04d}-{:02d}",
-            "{:05d}.{:06d}/{:04d}-{:02d}",
-            "{:04d}{:010d}",
-        ]
+    def _gerar_nome(self, incluir_titulo: bool = False) -> str:
+        """Gera nome completo."""
+        primeiro = random.choice(self.first_names)
+        sobrenome = random.choice(self.last_names)
         
-        formato = random.choice(formatos)
-        ano = random.randint(2015, 2025)
-        
-        if "{:04d}" in formato and formato.count("{") == 4:
-            return formato.format(
-                random.randint(0, 99999),
-                random.randint(0, 99999999),
-                ano,
-                random.randint(0, 99)
-            )
-        elif "{:05d}.{:06d}" in formato:
-            return formato.format(
-                random.randint(0, 99999),
-                random.randint(0, 999999),
-                ano,
-                random.randint(0, 99)
-            )
-        else:
-            return formato.format(
-                random.randint(0, 9999),
-                random.randint(0, 9999999999)
-            )
-    
-    def _gerar_numero_lei(self) -> str:
-        """Gera número de lei/decreto."""
-        ano = random.randint(1990, 2025)
-        numero = random.randint(1, 99999)
-        
-        formatos = [
-            f"nº {numero}/{ano}",
-            f"n° {numero:05d}/{ano}",
-            f"{numero}/{ano}",
-        ]
-        
-        return random.choice(formatos)
-    
-    def _gerar_nome_homenagem(self) -> str:
-        """Gera nome completo para homenagem."""
-        primeiro = random.choice(self.NOMES_HOMENAGEM)
-        sobrenome = random.choice(self.SOBRENOMES_HOMENAGEM)
-        
-        if random.random() < 0.4:
-            titulos = ["Dr.", "Profª", "Prof.", "Eng.", "Cel.", "Gen.", "Min."]
+        if incluir_titulo and random.random() < 0.3:
+            titulos = ['Dr.', 'Dra.', 'Prof.', 'Profª', 'Eng.']
             return f"{random.choice(titulos)} {primeiro} {sobrenome}"
+        
+        if random.random() < 0.3:
+            meio = random.choice(self.first_names)
+            return f"{primeiro} {meio} {sobrenome}"
         
         return f"{primeiro} {sobrenome}"
     
-    def gerar_exemplo_publico(self) -> str:
-        """Gera um exemplo de dado público aleatório."""
-        
-        categorias = [
-            self._gerar_orgao_acao,
-            self._gerar_processo,
-            self._gerar_norma,
-            self._gerar_pedido_generico,
-            self._gerar_empresa,
-            self._gerar_local_com_gatilho,  # NOVO: usa palavras-gatilho
-            self._gerar_lei_homenagem,
-            self._gerar_cargo_generico,
-        ]
-        
-        gerador = random.choice(categorias)
-        return gerador()
+    def _gerar_cpf(self) -> str:
+        """Gera CPF."""
+        formatos = ["{}{}{}.{}{}{}.{}{}{}-{}{}", "{}{}{}{}{}{}{}{}{}{}{}"]
+        digitos = [str(random.randint(0, 9)) for _ in range(11)]
+        return random.choice(formatos).format(*digitos)
     
-    def _gerar_orgao_acao(self) -> str:
-        orgao = random.choice(self.ORGAOS)
-        acao = random.choice(self.ACOES)
-        return f"{orgao} {acao}"
-    
-    def _gerar_processo(self) -> str:
-        tipo = random.choice(self.TIPOS_PROCESSO)
-        numero = self._gerar_numero_processo()
-        return f"{tipo} {numero}"
-    
-    def _gerar_norma(self) -> str:
-        tipo = random.choice(self.TIPOS_NORMA)
-        numero = self._gerar_numero_lei()
-        return f"{tipo} {numero}"
-    
-    def _gerar_pedido_generico(self) -> str:
-        verbos = ["Solicitação de", "Pedido de", "Requisição de", "Consulta sobre"]
-        tema = random.choice(self.TEMAS_GENERICOS)
-        return f"{random.choice(verbos)} {tema}"
+    def _gerar_email(self) -> str:
+        """Gera email."""
+        primeiro = random.choice(self.first_names).lower()
+        dominios = ["gmail.com", "outlook.com", "yahoo.com.br", "hotmail.com"]
+        return f"{primeiro}{random.randint(1, 999)}@{random.choice(dominios)}"
     
     def _gerar_empresa(self) -> str:
-        empresa = random.choice(self.EMPRESAS)
-        acao = random.choice(self.ACOES)
-        return f"{empresa} {acao}"
+        """Gera nome de empresa realista."""
+        nomes = [
+            "BIOCASA COMERCIO DE MATERIAL FISIOTERAPICO LTDA",
+            "CONSTRUTORA SILVA E SANTOS S.A.",
+            "TRANSPORTADORA RÁPIDA LTDA",
+            "COMERCIAL ATACADISTA DO NORDESTE",
+            "SERVIÇOS DE ENGENHARIA XYZ EIRELI",
+        ]
+        return random.choice(nomes)
     
-    def _gerar_local_com_gatilho(self) -> str:
+    def gerar_exemplos_pii(self, n: int = 500) -> List:
         """
-        NOVO: Gera exemplos usando palavras-gatilho + nomes.
-        Ex: "Hospital Dr. João Silva", "Rua Maria Santos"
+        Gera exemplos com PII (papel individualizante presente).
         """
-        # Escolhe palavra-gatilho de locais
-        gatilhos_locais = [
-            'hospital', 'upa', 'ubs', 'escola', 'colégio', 'universidade',
-            'biblioteca', 'museu', 'teatro', 'rua', 'avenida', 'praça',
-            'edifício', 'fórum', 'delegacia', 'igreja', 'bairro'
+        exemplos = []
+        
+        templates = [
+            # Papéis explícitos
+            ("Requerente: {nome}", "papel_nominal"),
+            ("Solicitante: {nome}", "papel_nominal"),
+            ("Cidadão {nome} solicitou", "papel_nominal"),
+            ("Titular dos dados: {nome}", "papel_nominal"),
+            ("{nome}, CPF {cpf}", "dados_associados"),
+            ("{nome}, email: {email}", "dados_associados"),
+            
+            # Verbos de ação individual
+            ("{nome} solicitou acesso à informação", "verbo_individual"),
+            ("{nome} requereu documentos", "verbo_individual"),
+            ("{nome} protocolou pedido", "verbo_individual"),
+            ("{nome} compareceu para atendimento", "verbo_individual"),
+            
+            # Contextos de identificação
+            ("Nome: {nome}", "contexto_id"),
+            ("Identificação: {nome}", "contexto_id"),
+            ("Na qualidade de representante da {empresa}, solicito...", "representante_empresa"),
+            
+            # Casos mais complexos (reais)
+            ("Prezados, na qualidade de representante da {empresa}, {nome} solicita informações.", "caso_complexo"),
         ]
         
-        gatilho = random.choice(gatilhos_locais).title()
-        nome = self._gerar_nome_homenagem()
+        for _ in range(n):
+            template, tipo = random.choice(templates)
+            
+            texto = template.format(
+                nome=self._gerar_nome(),
+                cpf=self._gerar_cpf(),
+                email=self._gerar_email(),
+                empresa=self._gerar_empresa()
+            )
+            
+            exemplos.append({
+                'text': texto,
+                'intent': 'tem_pii',
+                'tipo_pii': tipo
+            })
         
-        return f"{gatilho} {nome}"
+        return exemplos
     
-    def _gerar_lei_homenagem(self) -> str:
-        nome = self._gerar_nome_homenagem()
-        temas = [
-            "proteção à infância", "direitos humanos", "acesso à informação",
-            "proteção ao consumidor", "meio ambiente", "saúde pública", "educação",
+    def gerar_exemplos_publicos(self, n: int = 500) -> List:
+        """
+        Gera exemplos PÚBLICOS (sem papel individualizante).
+        
+        IMPORTANTE: Inclui nomes completos que NÃO são PII.
+        """
+        exemplos = []
+        
+        templates_institucionais = [
+            # Denominações institucionais
+            ("Hospital {nome}", "instituicao"),
+            ("Escola Municipal {nome}", "instituicao"),
+            ("Biblioteca {nome}", "instituicao"),
+            ("Teatro {nome}", "instituicao"),
+            ("Rua {nome}", "toponimo"),
+            ("Avenida {nome}", "toponimo"),
+            ("Praça {nome}", "toponimo"),
+            
+            # Homenagens e atos normativos
+            ("Lei {nome}", "lei_homenagem"),
+            ("Decreto {nome}", "lei_homenagem"),
+            ("Prêmio {nome} de Direitos Humanos", "premio"),
+            ("Programa {nome}", "programa"),
+            ("Projeto {nome}", "projeto"),
+            ("Relatório {nome}", "relatorio_nomeado"),
+            
+            # Empresas (sem representante identificado)
+            ("{empresa} solicitou informações", "empresa_juridica"),
+            ("A empresa {empresa} protocolou", "empresa_juridica"),
+            
+            # Processos e documentos genéricos
+            ("Processo {numero}", "processo"),
+            ("Protocolo {numero}", "processo"),
+            ("Solicitação de dados sobre licitação", "pedido_generico"),
+            ("Informações sobre contrato público", "pedido_generico"),
         ]
-        return f"Lei {nome}, {random.choice(temas)}"
-    
-    def _gerar_cargo_generico(self) -> str:
-        cargos = ["O Diretor", "O Secretário", "A Ministra", "O Presidente", 
-                  "O Coordenador", "A Chefe", "O Relator"]
-        acoes = ["informou em reunião", "declarou em coletiva", "assinou despacho",
-                 "votou favoravelmente", "apresentou relatório"]
-        return f"{random.choice(cargos)} {random.choice(acoes)}"
-
-# =============================================================================
-# GERADOR DE DADOS DE TREINAMENTO
-# =============================================================================
-
-class TrainingDataGenerator:
-    """Gera dados de treinamento."""
-    
-    PII_TEMPLATES_WITH_ENTITIES = [
-        {"template": "{pessoa} solicitou acesso à informação",
-         "entities": [{"entity": "PESSOA", "role": "solicitante"}]},
-        {"template": "Requerente: {pessoa}",
-         "entities": [{"entity": "PESSOA", "role": "requerente"}]},
-        {"template": "Cidadão {pessoa} requisitou documentos",
-         "entities": [{"entity": "PESSOA", "role": "cidadao"}]},
-        {"template": "Titular dos dados: {pessoa}",
-         "entities": [{"entity": "PESSOA", "role": "titular"}]},
         
-        # Documentos
-        {"template": "CPF: {cpf}",
-         "entities": [{"entity": "CPF", "role": "documento"}]},
-        {"template": "RG: {rg}",
-         "entities": [{"entity": "RG", "role": "documento"}]},
-        {"template": "CIN: {cin}",
-         "entities": [{"entity": "CIN", "role": "documento"}]},
-        {"template": "Passaporte: {passaporte}",
-         "entities": [{"entity": "PASSAPORTE", "role": "documento"}]},
-        {"template": "Email: {email}",
-         "entities": [{"entity": "EMAIL", "role": "contato"}]},
-        {"template": "Telefone: {telefone}",
-         "entities": [{"entity": "TELEFONE", "role": "contato"}]},
+        for _ in range(n):
+            template, tipo = random.choice(templates_institucionais)
+            
+            texto = template.format(
+                nome=self._gerar_nome(incluir_titulo=True),
+                empresa=self._gerar_empresa(),
+                numero=f"{random.randint(1000, 9999)}-{random.randint(100, 999)}/{random.randint(2020, 2025)}"
+            )
+            
+            exemplos.append({
+                'text': texto,
+                'intent': 'publico',
+                'tipo': tipo
+            })
         
-        # Combinações
-        {"template": "{pessoa}, CPF {cpf}",
-         "entities": [{"entity": "PESSOA", "role": "solicitante"},
-                      {"entity": "CPF", "role": "documento"}]},
-        {"template": "{pessoa} - RG {rg}",
-         "entities": [{"entity": "PESSOA", "role": "solicitante"},
-                      {"entity": "RG", "role": "documento"}]},
-    ]
+        return exemplos
     
-    def __init__(self, first_names: List[str] = None, last_names: List[str] = None):
-        self.first_names = first_names if first_names is not None else list(FIRST_NAMES)
-        self.last_names = last_names if last_names is not None else list(SIR_NAMES)
-        self.public_generator = PublicDataGenerator()
-        
-        print(f"✓ Gerador inicializado com {len(self.first_names):,} primeiros nomes")
-        print(f"✓ Sistema de palavras-gatilho ativado ({len(PALAVRAS_GATILHO_PUBLICO_NORMALIZED)} palavras)")
-    
-    def _generate_pessoa(self) -> str:
-        first = random.choice(self.first_names)
-        last = random.choice(self.last_names)
-        if random.random() < 0.3:
-            middle = random.choice(self.first_names)
-            return f"{first} {middle} {last}"
-        return f"{first} {last}"
-    
-    def _generate_cpf(self) -> str:
-        formats = ["{}{}{}.{}{}{}.{}{}{}-{}{}", "{}{}{}{}{}{}{}{}{}{}{}"]
-        digits = [str(random.randint(0, 9)) for _ in range(11)]
-        return random.choice(formats).format(*digits)
-    
-    def _generate_rg(self) -> str:
-        formats = ["{}{}.{}{}{}.{}{}{}-{}", "{}{}{}{}{}{}{}{}{}", "{}{}.{}{}{}.{}{}{}"]
-        digits = [str(random.randint(0, 9)) for _ in range(9)]
-        return random.choice(formats).format(*digits)
-    
-    def _generate_cin(self) -> str:
-        formats = ["{}{}{}{} {}{}{}{} {}{}{}{}", "{}{}{}{}{}{}{}{}{}{}{}{}"]
-        digits = [str(random.randint(0, 9)) for _ in range(12)]
-        return random.choice(formats).format(*digits)
-    
-    def _generate_passaporte(self) -> str:
-        letters = ''.join(random.choices('ABCDEFGHIJKLMNOPQRSTUVWXYZ', k=2))
-        digits = ''.join([str(random.randint(0, 9)) for _ in range(6)])
-        return f"{letters}{digits}"
-    
-    def _generate_email(self) -> str:
-        first = random.choice(self.first_names).lower()
-        domains = ["gmail.com", "outlook.com", "yahoo.com.br", "hotmail.com"]
-        return f"{first}{random.randint(1, 999)}@{random.choice(domains)}"
-    
-    def _generate_telefone(self) -> str:
-        formats = ["({}{}) {}{}{}{}-{}{}{}{}", "({}{}) {}{}{}{}{}{}{}{}", "{}{}{}{}{}{}{}{}{}{}"]
-        digits = [str(random.randint(0, 9)) for _ in range(10)]
-        return random.choice(formats).format(*digits)
-    
-    def _numero_para_extenso(self, numero: str) -> str:
-        mapa = {'0': 'zero', '1': 'um', '2': 'dois', '3': 'três', '4': 'quatro',
-                '5': 'cinco', '6': 'seis', '7': 'sete', '8': 'oito', '9': 'nove'}
-        return ' '.join(mapa.get(d, d) for d in numero if d.isdigit())
-    
-    def generate_training_data(self, n_public: int = 500, n_pii: int = 500, 
-                              incluir_extenso: bool = True) -> List[TrainingExample]:
-        """Gera dados de treinamento."""
-        examples = []
-        
-        # Públicos
-        print(f"Gerando {n_public} exemplos públicos...")
-        for i in range(n_public):
-            text = self.public_generator.gerar_exemplo_publico()
-            examples.append(TrainingExample(text=text, intent="publico", entities=[]))
-            if (i + 1) % 100 == 0:
-                print(f"  ✓ {i + 1}/{n_public}")
-        
-        # PII
+    def gerar_dataset_completo(self, n_pii: int = 500, n_publico: int = 500) -> List:
+        """Gera dataset balanceado."""
         print(f"Gerando {n_pii} exemplos com PII...")
-        for i in range(n_pii):
-            template_data = random.choice(self.PII_TEMPLATES_WITH_ENTITIES)
-            template = template_data["template"]
-            entity_specs = template_data["entities"]
-            
-            text = template
-            entities = []
-            
-            for entity_spec in entity_specs:
-                entity_type = entity_spec["entity"]
-                role = entity_spec.get("role", "")
-                
-                if entity_type == "PESSOA":
-                    value = self._generate_pessoa()
-                    placeholder = "{pessoa}"
-                elif entity_type == "CPF":
-                    value = self._generate_cpf()
-                    placeholder = "{cpf}"
-                elif entity_type == "RG":
-                    value = self._generate_rg()
-                    placeholder = "{rg}"
-                elif entity_type == "CIN":
-                    value = self._generate_cin()
-                    placeholder = "{cin}"
-                elif entity_type == "PASSAPORTE":
-                    value = self._generate_passaporte()
-                    placeholder = "{passaporte}"
-                elif entity_type == "EMAIL":
-                    value = self._generate_email()
-                    placeholder = "{email}"
-                elif entity_type == "TELEFONE":
-                    value = self._generate_telefone()
-                    placeholder = "{telefone}"
-                else:
-                    continue
-                
-                start = text.find(placeholder)
-                if start != -1:
-                    text = text.replace(placeholder, value, 1)
-                    end = start + len(value)
-                    entities.append({
-                        "start": start, "end": end, "value": value,
-                        "entity": entity_type, "role": role
-                    })
-            
-            examples.append(TrainingExample(text=text, intent="tem_pii", entities=entities))
-            if (i + 1) % 100 == 0:
-                print(f"  ✓ {i + 1}/{n_pii}")
+        pii = self.gerar_exemplos_pii(n_pii)
         
-        # Extenso
-        if incluir_extenso:
-            n_extenso = min(100, n_pii // 5)
-            print(f"Gerando {n_extenso} exemplos com números por extenso...")
-            
-            for _ in range(n_extenso):
-                num_digitos = random.choice([9, 10, 11])
-                numero = ''.join([str(random.randint(0, 9)) for _ in range(num_digitos)])
-                valor_extenso = self._numero_para_extenso(numero)
-                
-                templates = ["CPF: {v}", "RG {v}", "Documento {v}"]
-                text = random.choice(templates).replace("{v}", valor_extenso)
-                
-                entity_type = "CPF" if num_digitos == 11 else ("RG" if num_digitos == 9 else "CIN")
-                
-                examples.append(TrainingExample(
-                    text=text, intent="tem_pii",
-                    entities=[{"start": text.find(valor_extenso), 
-                              "end": text.find(valor_extenso) + len(valor_extenso),
-                              "value": valor_extenso, "entity": entity_type, 
-                              "role": "documento_extenso"}]
-                ))
+        print(f"Gerando {n_publico} exemplos públicos...")
+        publico = self.gerar_exemplos_publicos(n_publico)
         
-        random.shuffle(examples)
+        todos = pii + publico
+        random.shuffle(todos)
         
-        print(f"\n✓ Total: {len(examples)} exemplos")
-        print(f"  - Públicos: {sum(1 for e in examples if e.intent == 'publico')}")
-        print(f"  - PII: {sum(1 for e in examples if e.intent == 'tem_pii')}")
+        print(f"\n✓ Total: {len(todos)} exemplos")
+        print(f"  - Com PII: {len(pii)}")
+        print(f"  - Públicos: {len(publico)}")
         
-        return examples
+        return todos
     
-    def save_to_json(self, examples: List[TrainingExample], output_file: str):
+    def salvar_json(self, exemplos: List[Dict], output_file: str):
+        """Salva dataset em JSON."""
         training_data = {
-            "version": "1.0",
+            "version": "2.0",
             "language": "pt",
-            "data": {"common_examples": [ex.to_dict() for ex in examples]}
+            "metadata": {
+                "modelo": "classificacao_semantica",
+                "criterio": "papel_individualizante"
+            },
+            "data": {"common_examples": exemplos}
         }
         
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -617,11 +471,13 @@ class TrainingDataGenerator:
         print(f"✓ Dados salvos: {output_file}")
 
 # =============================================================================
-# DETECTOR COM SISTEMA DE CONTEXTO
+# DETECTOR V2 - COM CLASSIFICAÇÃO SEMÂNTICA
 # =============================================================================
 
-class PIIDetector:
-    """Detector de PII com análise de contexto."""
+class PIIDetectorV2:
+    """
+    Detector de PII com classificação semântica em 3 camadas.
+    """
     
     def __init__(self, model_name: str = "pt_core_news_sm"):
         try:
@@ -631,15 +487,15 @@ class PIIDetector:
             print(f"⚠ Modelo não encontrado. Criando vazio...")
             self.nlp = spacy.blank("pt")
         
+        # Regex para camada 1
         self.regex_patterns = {
             "CPF": r'\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b',
-            "RG": r'\b\d{2}\.?\d{3}\.?\d{3}-?\d{1}\b|\b\d{9}\b|\b\d{2}\.?\d{3}\.?\d{3}\b',
-            "CIN": r'\b\d{4}\s?\d{4}\s?\d{4}\b|\b\d{12}\b',
-            "PASSAPORTE": r'\b[A-Z]{2}\d{6}\b',
+            "RG": r'\b\d{2}\.?\d{3}\.?\d{3}-?\d{1}\b|\b\d{9}\b',
             "EMAIL": r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b',
             "TELEFONE": r'\b\(?\d{2}\)?\s?\d{4,5}[-\s]?\d{4}\b',
         }
         
+        # NER
         if "ner" not in self.nlp.pipe_names:
             self.ner = self.nlp.add_pipe("ner")
         else:
@@ -648,16 +504,48 @@ class PIIDetector:
         self.ner.add_label("PESSOA")
         self._is_trained = False
     
-    def train(self, training_examples: List[TrainingExample], n_iter: int = 30, drop: float = 0.5):
-        print(f"\n🧠 Treinando ({n_iter} iterações)...")
+    def train(self, training_data: List[Dict], n_iter: int = 30):
+        """Treina apenas o NER (não a classificação semântica)."""
+        print(f"\n🧠 Treinando NER ({n_iter} iterações)...")
         
+        # Prepara exemplos apenas com entidades PESSOA
         spacy_examples = []
-        for ex in training_examples:
-            doc = self.nlp.make_doc(ex.text)
-            entities = [(ent["start"], ent["end"], "PESSOA") 
-                       for ent in ex.entities if ent["entity"] == "PESSOA"]
-            spacy_examples.append(Example.from_dict(doc, {"entities": entities}))
         
+        for ex in training_data:
+            if ex['intent'] == 'tem_pii':
+                doc = self.nlp.make_doc(ex['text'])
+                
+                # Encontra nomes no texto (heurística simples: 2+ palavras capitalizadas)
+                palavras = ex['text'].split()
+                entities = []
+                
+                i = 0
+                while i < len(palavras):
+                    if palavras[i][0].isupper():
+                        # Tenta formar nome de 2-3 palavras
+                        nome_candidato = []
+                        j = i
+                        while j < len(palavras) and palavras[j][0].isupper() and len(nome_candidato) < 3:
+                            nome_candidato.append(palavras[j])
+                            j += 1
+                        
+                        if len(nome_candidato) >= 2:
+                            nome = ' '.join(nome_candidato)
+                            pos = ex['text'].find(nome)
+                            if pos != -1:
+                                entities.append((pos, pos + len(nome), "PESSOA"))
+                            i = j
+                        else:
+                            i += 1
+                    else:
+                        i += 1
+                
+                if entities:
+                    spacy_examples.append(Example.from_dict(doc, {"entities": entities}))
+        
+        print(f"  Exemplos com entidades: {len(spacy_examples)}")
+        
+        # Treina
         other_pipes = [p for p in self.nlp.pipe_names if p != "ner"]
         
         with self.nlp.disable_pipes(*other_pipes):
@@ -669,83 +557,87 @@ class PIIDetector:
                 
                 for i in range(0, len(spacy_examples), 8):
                     batch = spacy_examples[i:i+8]
-                    self.nlp.update(batch, drop=drop, losses=losses, sgd=optimizer)
+                    self.nlp.update(batch, drop=0.5, losses=losses, sgd=optimizer)
                 
                 if iteration % 5 == 0:
                     print(f"  Iteração {iteration}/{n_iter} | Loss: {losses.get('ner', 0):.2f}")
         
         self._is_trained = True
-        print("✓ Treinamento concluído!")
+        print("✓ Treinamento de NER concluído!")
     
-    def predict(self, text: str, usar_contexto: bool = True) -> Dict:
+    def predict(self, text: str, verbose: bool = False) -> Dict:
         """
-        Predição com análise de contexto.
-        
-        Args:
-            text: Texto para análise
-            usar_contexto: Se True, filtra nomes em contexto público
+        Predição em 3 camadas:
+        1. Extração (Regex + NER)
+        2. Classificação semântica (decide se é PII)
+        3. Regras de exclusão
         """
-        entities = []
+        entities_pii = []
+        entities_nao_pii = []
         
-        # 1. Regex
+        # CAMADA 1: EXTRAÇÃO - Regex (sempre PII)
         for entity_type, pattern in self.regex_patterns.items():
             for match in re.finditer(pattern, text):
-                entities.append({
-                    "start": match.start(), "end": match.end(),
-                    "value": match.group(0), "entity": entity_type,
-                    "extractor": "RegexEntityExtractor"
+                entities_pii.append({
+                    "start": match.start(),
+                    "end": match.end(),
+                    "value": match.group(0),
+                    "entity": entity_type,
+                    "extractor": "RegexEntityExtractor",
+                    "razao": "documento_ou_contato"
                 })
         
-        # 2. Números extenso
-        numeros_extenso = detectar_numeros_extenso(text)
-        for num_ext in numeros_extenso:
-            tamanho = len(num_ext['valor_numerico'])
-            entity_type = "CPF" if tamanho == 11 else ("CIN" if tamanho == 12 else "RG")
-            
-            entities.append({
-                "start": num_ext['start'], "end": num_ext['end'],
-                "value": num_ext['texto_original'],
-                "valor_numerico": num_ext['valor_numerico'],
-                "entity": entity_type,
-                "extractor": "NumeroExtensoExtractor"
-            })
-        
-        # 3. NER com filtro de contexto
+        # CAMADA 2 + 3: NER + CLASSIFICAÇÃO SEMÂNTICA
         if self._is_trained:
             doc = self.nlp(text)
             for ent in doc.ents:
                 if ent.label_ == "PESSOA" and len(ent.text.split()) >= 2:
-                    # NOVO: Verifica contexto
-                    if usar_contexto:
-                        contexto_info = extrair_contexto_nome(text, ent.text)
-                        
-                        if contexto_info['tem_contexto_publico']:
-                            # Nome em contexto público - NÃO é PII
-                            continue
+                    # DECISÃO: Este nome identifica pessoa natural?
+                    decisao = nome_identifica_pessoa_natural(
+                        text, ent.text, ent.start_char, ent.end_char
+                    )
                     
-                    entities.append({
-                        "start": ent.start_char, "end": ent.end_char,
-                        "value": ent.text, "entity": "PESSOA",
-                        "extractor": "IntentEntityClassifier"
-                    })
+                    if decisao['e_pii']:
+                        entities_pii.append({
+                            "start": ent.start_char,
+                            "end": ent.end_char,
+                            "value": ent.text,
+                            "entity": "PESSOA",
+                            "extractor": "SemanticClassifier",
+                            "razao": decisao['razao'],
+                            "detalhes": decisao['detalhes']
+                        })
+                    else:
+                        if verbose:
+                            entities_nao_pii.append({
+                                "value": ent.text,
+                                "razao": decisao['razao'],
+                                "detalhes": decisao['detalhes']
+                            })
         
-        has_pii = len(entities) > 0
+        has_pii = len(entities_pii) > 0
         intent = "tem_pii" if has_pii else "publico"
-        confidence = 0.95 if has_pii else 0.85
         
-        return {
+        result = {
             "intent": intent,
-            "confidence": confidence,
-            "entities": entities,
+            "confidence": 0.9 if has_pii else 0.85,
+            "entities": entities_pii,
             "text": text
         }
+        
+        if verbose:
+            result["entities_excluidas"] = entities_nao_pii
+        
+        return result
     
     def save(self, model_path: str):
+        """Salva modelo."""
         Path(model_path).mkdir(parents=True, exist_ok=True)
         self.nlp.to_disk(model_path)
         print(f"✓ Modelo salvo: {model_path}")
     
     def load(self, model_path: str):
+        """Carrega modelo."""
         self.nlp = spacy.load(model_path)
         self.ner = self.nlp.get_pipe("ner")
         self._is_trained = True
@@ -757,46 +649,39 @@ class PIIDetector:
 
 if __name__ == "__main__":
     print("="*80)
-    print("DETECTOR DE PII COM SISTEMA DE PALAVRAS-GATILHO")
+    print("DETECTOR DE PII V2 - COM CLASSIFICAÇÃO SEMÂNTICA")
     print("="*80)
     
-    # Demonstração
-    print("\n📊 DEMONSTRAÇÃO: Exemplos com palavras-gatilho")
-    print("-" * 80)
-    
-    demo_gen = PublicDataGenerator()
-    for i in range(15):
-        exemplo = demo_gen.gerar_exemplo_publico()
-        print(f"{i+1:2d}. {exemplo}")
-    
-    print("\n" + "="*80)
-    
-    # Treina
+    # 1. Gera dados
     print("\n1️⃣ Gerando dados de treinamento...")
-    generator = TrainingDataGenerator()
-    training_data = generator.generate_training_data(n_public=500, n_pii=500)
+    generator = TrainingDataGeneratorV2()
+    training_data = generator.gerar_dataset_completo(n_pii=500, n_publico=500)
     
     print("\n2️⃣ Salvando...")
-    generator.save_to_json(training_data, "training_data_final.json")
+    generator.salvar_json(training_data, "training_data_v2.json")
     
+    # 2. Treina
     print("\n3️⃣ Treinando...")
-    detector = PIIDetector()
+    detector = PIIDetectorV2()
     detector.train(training_data, n_iter=20)
     
-    print("\n4️⃣ Testando com palavras-gatilho...")
+    # 3. Testa
+    print("\n4️⃣ Testando casos críticos...")
     test_cases = [
-        # Contexto público (NÃO deve detectar como PII)
+        # DEVEM SER PÚBLICOS (sem papel individualizante)
         "Hospital Dr. João Silva",
         "Rua Maria Santos",
-        "Lei Carlos Alberto, proteção ao consumidor",
-        "Escola Municipal Pedro Álvares",
-        "Universidade Federal de São Paulo",
+        "Lei Carlos Alberto",
+        "Prêmio João da Silva de Direitos Humanos",
+        "Relatório Pedro Álvares",
+        "BIOCASA COMERCIO DE MATERIAL FISIOTERAPICO LTDA solicita informações",
         
-        # PII (DEVE detectar)
+        # DEVEM SER PII (papel individualizante presente)
         "João Silva solicitou acesso",
         "Requerente: Maria Santos",
+        "Na qualidade de representante da BIOCASA, João Silva solicita",
         "CPF: 123.456.789-00",
-        "RG um dois três quatro cinco seis sete oito nove",
+        "Cidadão Pedro Oliveira requereu documentos",
     ]
     
     print("\n" + "="*80)
@@ -804,14 +689,49 @@ if __name__ == "__main__":
     print("="*80)
     
     for text in test_cases:
-        result = detector.predict(text, usar_contexto=True)
-        contexto = "🟢 PÚBLICO" if result['intent'] == 'publico' else "🔴 PII"
+        result = detector.predict(text, verbose=True)
         
-        print(f"\n{contexto} | {text}")
+        if result['intent'] == 'publico':
+            status = "✅ PÚBLICO"
+            cor = "\033[92m"  # Verde
+        else:
+            status = "⚠️  PII"
+            cor = "\033[91m"  # Vermelho
+        
+        print(f"\n{cor}{status}\033[0m | {text}")
+        
         if result['entities']:
             for ent in result['entities']:
-                print(f"         └─ {ent['entity']}: {ent['value']}")
+                print(f"  🔴 {ent['entity']}: {ent['value']}")
+                print(f"     Razão: {ent['razao']}")
+        
+        if 'entities_excluidas' in result and result['entities_excluidas']:
+            for ent in result['entities_excluidas']:
+                print(f"  🟢 EXCLUÍDO: {ent['value']}")
+                print(f"     Razão: {ent['razao']}")
     
     print("\n" + "="*80)
-    print("✅ CONCLUÍDO!")
+    print("✅ TESTE CONCLUÍDO!")
     print("="*80)
+    
+    # 4. Testa caso real problemático
+    print("\n5️⃣ Testando caso real do edital...")
+    caso_real = """Prezados, boa noite. Na qualidade de representante da BIOCASA COMERCIO DE MATERIAL FISIOTERÁPICO LTDA - ME, solicito, gentilmente, o envio dos Processos Administrativos, extratos, bem como quaisquer outras informações relativas às Certidões de Dívida Ativa nº 1000258954 e 0002574863. Agradeço a disponibilidade e aguardo o retorno. Atenciosamente,"""
+    
+    result = detector.predict(caso_real, verbose=True)
+    
+    print(f"\nTexto: {caso_real[:100]}...")
+    print(f"\nClassificação: {result['intent'].upper()}")
+    print(f"Confiança: {result['confidence']:.2f}")
+    
+    if result['entities']:
+        print("\nPII detectado:")
+        for ent in result['entities']:
+            print(f"  - {ent['entity']}: {ent['value']}")
+            print(f"    Razão: {ent['razao']}")
+    
+    if 'entities_excluidas' in result and result['entities_excluidas']:
+        print("\nEntidades excluídas (não são PII):")
+        for ent in result['entities_excluidas']:
+            print(f"  - {ent['value']}")
+            print(f"    Razão: {ent['razao']}")

@@ -1,0 +1,61 @@
+{
+  "timestamp": "20260130_112515",
+  "version": "2.0",
+  "config": {
+    "n_public_examples": 1000,
+    "n_pii_examples": 1000,
+    "n_iterations": 30,
+    "dropout_rate": 0.5,
+    "test_split": 0.2,
+    "random_seed": 42,
+    "verbose_evaluation": true
+  },
+  "results": {
+    "accuracy": 0.57,
+    "total_examples": 400,
+    "correct": 228,
+    "incorrect": 172,
+    "by_intent": {
+      "publico": {
+        "total": 200,
+        "correct": 200,
+        "tp": 200,
+        "fp": 172,
+        "fn": 0,
+        "precision": 0.5376344086021505,
+        "recall": 1.0,
+        "f1_score": 0.6993006993006993
+      },
+      "tem_pii": {
+        "total": 200,
+        "correct": 28,
+        "tp": 28,
+        "fp": 0,
+        "fn": 172,
+        "precision": 1.0,
+        "recall": 0.14,
+        "f1_score": 0.24561403508771928
+      }
+    },
+    "confusion_matrix": {
+      "publico_as_publico": 200,
+      "publico_as_pii": 0,
+      "pii_as_publico": 172,
+      "pii_as_pii": 28
+    },
+    "reasons": {
+      "pii": {
+        "documento_ou_contato": 35,
+        "papel_individualizante": 1,
+        "dados_associados": 1
+      },
+      "publico": {
+        "contexto_exclusao": 160
+      }
+    },
+    "error_counts": {
+      "false_positives": 0,
+      "false_negatives": 20
+    }
+  }
+}
