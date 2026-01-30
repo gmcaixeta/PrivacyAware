@@ -283,13 +283,3 @@ which python  # deve mostrar .venv/bin/python
 where python  # deve mostrar .venv\Scripts\python.exe
 ```
 
-### **Erro ao descompactar models.zip**
-```bash
-# Verifique se o arquivo existe
-ls models.zip
-
-# Verifique se tem permissão de leitura
-chmod 644 models.zip  # Linux/Mac
-```
-
----
