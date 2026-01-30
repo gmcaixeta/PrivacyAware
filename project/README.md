@@ -32,7 +32,7 @@ Docker é como uma "máquina virtual leve" que garante que o projeto funcione ig
 
 ### **Passo 1: Instalar o Docker**
 
-* Caso já tenha o docker instalado na maquina, pular o passo 1, e começar no passo 2 (igual ao vídeo).
+* Caso já tenha o Docker instalado na máquina, pule o passo 1 e comece no passo 2.
 
 #### Windows:
 1. Baixe o Docker Desktop: https://docs.docker.com/desktop/install/windows-install/
